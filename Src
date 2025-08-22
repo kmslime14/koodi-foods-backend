@@ -1,0 +1,584 @@
+import React, { useState, useEffect, createContext, useContext } from 'react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
+import { Users, ShoppingBag, TrendingUp, Star, Phone, Mail, Calendar, Eye, Search, Download } from 'lucide-react';
+
+// Your live API URL
+const API_BASE_URL = 'https://koodi-foods-backend-xii6.onrender.com/api';
+
+// Create contexts
+const AdminDataContext = createContext();
+
+// Colors matching the mobile app
+const COLORS = {
+  primary: '#5A4A3A',
+  secondary: '#6B8E23',
+  accent: '#9ACD32',
+  background: '#F8F9FA',
+  text: '#2C3E50',
+  lightGray: '#BDC3C7',
+  white: '#FFFFFF',
+  success: '#27AE60',
+  border: '#ECF0F1',
+  warning: '#F39C12',
+  danger: '#E74C3C',
+  special: '#FF6B6B'
+};
+
+// Data Provider with live API calls
+const AdminDataProvider = ({ children }) => {
+  const [users, setUsers] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [menuItems, setMenuItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    fetchAllData();
+  }, []);
+
+  const fetchAllData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Fetch users
+      const usersResponse = await fetch(`${API_BASE_URL}/users`);
+      if (usersResponse.ok) {
+        const usersData = await usersResponse.json();
+        setUsers(usersData);
+      }
+
+      // Fetch orders
+      const ordersResponse = await fetch(`${API_BASE_URL}/orders`);
+      if (ordersResponse.ok) {
+        const ordersData = await ordersResponse.json();
+        setOrders(ordersData);
+      }
+
+      // Fetch menu items
+      const menuResponse = await fetch(`${API_BASE_URL}/admin/menu`);
+      if (menuResponse.ok) {
+        const menuData = await menuResponse.json();
+        setMenuItems(menuData);
+      } else {
+        // Fallback to regular menu endpoint
+        const menuResponse2 = await fetch(`${API_BASE_URL}/menu`);
+        if (menuResponse2.ok) {
+          const menuData = await menuResponse2.json();
+          setMenuItems(menuData);
+        }
+      }
+
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      setError('Failed to load data. Please check if the server is running.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateOrderStatus = async (orderId, newStatus) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/orders/${orderId}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: newStatus }),
+      });
+
+      if (response.ok) {
+        setOrders(prev => prev.map(order => 
+          order._id === orderId ? { ...order, status: newStatus } : order
+        ));
+      }
+    } catch (error) {
+      console.error('Error updating order status:', error);
+    }
+  };
+
+  const getAnalytics = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/analytics`);
+      if (response.ok) {
+        const analytics = await response.json();
+        return analytics;
+      }
+    } catch (error) {
+      console.error('Error fetching analytics:', error);
+    }
+    
+    // Fallback: calculate analytics from current data
+    const totalRevenue = orders.reduce((sum, order) => sum + order.total, 0);
+    const totalOrders = orders.length;
+    const totalUsers = users.length;
+    const avgOrderValue = totalRevenue / totalOrders || 0;
+
+    const statusBreakdown = {};
+    orders.forEach(order => {
+      statusBreakdown[order.status] = (statusBreakdown[order.status] || 0) + 1;
+    });
+
+    return {
+      totalRevenue,
+      totalOrders,
+      totalUsers,
+      avgOrderValue,
+      statusBreakdown,
+      revenueByDay: {}
+    };
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading admin panel...</p>
+          <p className="text-sm text-gray-500 mt-2">Connecting to API...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-red-600 text-xl mb-4">⚠️</div>
+          <p className="text-gray-800 mb-4">{error}</p>
+          <button 
+            onClick={fetchAllData}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <AdminDataContext.Provider value={{
+      users,
+      orders,
+      menuItems,
+      updateOrderStatus,
+      getAnalytics,
+      refreshData: fetchAllData
+    }}>
+      {children}
+    </AdminDataContext.Provider>
+  );
+};
+
+const useAdminData = () => useContext(AdminDataContext);
+
+// Dashboard Component
+const Dashboard = () => {
+  const { getAnalytics } = useAdminData();
+  const [analytics, setAnalytics] = useState({
+    totalRevenue: 0,
+    totalOrders: 0,
+    totalUsers: 0,
+    avgOrderValue: 0,
+    statusBreakdown: {},
+    revenueByDay: {}
+  });
+
+  useEffect(() => {
+    loadAnalytics();
+  }, []);
+
+  const loadAnalytics = async () => {
+    const data = await getAnalytics();
+    setAnalytics(data);
+  };
+
+  const statusData = Object.entries(analytics.statusBreakdown || {}).map(([status, count]) => ({
+    name: status.charAt(0).toUpperCase() + status.slice(1),
+    value: count,
+    color: {
+      delivered: COLORS.success,
+      preparing: COLORS.warning,
+      delivering: COLORS.secondary,
+      placed: COLORS.primary
+    }[status] || COLORS.lightGray
+  }));
+
+  return (
+    <div className="space-y-6">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="bg-white rounded-lg p-6 shadow-sm border">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Total Revenue</p>
+              <p className="text-2xl font-bold text-green-600">
+                UGX {analytics.totalRevenue.toLocaleString()}
+              </p>
+            </div>
+            <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+              <span className="text-green-600">💰</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg p-6 shadow-sm border">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Total Orders</p>
+              <p className="text-2xl font-bold text-blue-600">{analytics.totalOrders}</p>
+            </div>
+            <ShoppingBag className="w-8 h-8 text-blue-600" />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg p-6 shadow-sm border">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Total Users</p>
+              <p className="text-2xl font-bold text-purple-600">{analytics.totalUsers}</p>
+            </div>
+            <Users className="w-8 h-8 text-purple-600" />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg p-6 shadow-sm border">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Avg Order Value</p>
+              <p className="text-2xl font-bold text-orange-600">
+                UGX {Math.round(analytics.avgOrderValue).toLocaleString()}
+              </p>
+            </div>
+            <TrendingUp className="w-8 h-8 text-orange-600" />
+          </div>
+        </div>
+      </div>
+
+      {/* Order Status Chart */}
+      {statusData.length > 0 && (
+        <div className="bg-white rounded-lg p-6 shadow-sm border">
+          <h3 className="text-lg font-semibold mb-4">Order Status Distribution</h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={statusData}
+                  cx="50%"
+                  cy="50%"
+                  labelLine={false}
+                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  outerRadius={80}
+                  fill="#8884d8"
+                  dataKey="value"
+                >
+                  {statusData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Orders Management Component
+const OrdersManagement = () => {
+  const { orders, updateOrderStatus } = useAdminData();
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterStatus, setFilterStatus] = useState('all');
+
+  const filteredOrders = orders.filter(order => {
+    const matchesSearch = order._id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         order.customerName?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesStatus = filterStatus === 'all' || order.status === filterStatus;
+    return matchesSearch && matchesStatus;
+  });
+
+  const getStatusColor = (status) => {
+    const colors = {
+      placed: 'bg-blue-100 text-blue-800',
+      preparing: 'bg-yellow-100 text-yellow-800',
+      delivering: 'bg-purple-100 text-purple-800',
+      delivered: 'bg-green-100 text-green-800'
+    };
+    return colors[status] || 'bg-gray-100 text-gray-800';
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold">Orders Management</h2>
+        <span className="text-sm text-gray-600">{filteredOrders.length} orders</span>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-white rounded-lg p-4 shadow-sm border">
+        <div className="flex flex-col md:flex-row gap-4">
+          <div className="flex items-center gap-2 flex-1">
+            <Search className="w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search orders..."
+              className="w-full px-3 py-2 border rounded-lg"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <select
+            className="px-3 py-2 border rounded-lg"
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+          >
+            <option value="all">All Status</option>
+            <option value="placed">Placed</option>
+            <option value="preparing">Preparing</option>
+            <option value="delivering">Delivering</option>
+            <option value="delivered">Delivered</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Orders Table */}
+      <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Order ID</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Items</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {filteredOrders.map((order) => (
+                <tr key={order._id || order.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    {order._id?.slice(-6) || order.id}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div>
+                      <div className="text-sm font-medium text-gray-900">{order.customerName}</div>
+                      <div className="text-sm text-gray-500">{order.customerPhone}</div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {order.items?.length || 0} items
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    UGX {order.total?.toLocaleString()}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(order.status)}`}>
+                      {order.status}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {new Date(order.orderTime || order.createdAt).toLocaleDateString()}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    <select
+                      value={order.status}
+                      onChange={(e) => updateOrderStatus(order._id || order.id, e.target.value)}
+                      className="text-xs border rounded px-2 py-1"
+                    >
+                      <option value="placed">Placed</option>
+                      <option value="preparing">Preparing</option>
+                      <option value="delivering">Delivering</option>
+                      <option value="delivered">Delivered</option>
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {filteredOrders.length === 0 && (
+        <div className="text-center py-8 text-gray-500">
+          No orders found matching your criteria.
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Users Management Component
+const UsersManagement = () => {
+  const { users } = useAdminData();
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const filteredUsers = users.filter(user =>
+    user.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    user.phone?.includes(searchTerm)
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold">Users Management</h2>
+        <span className="text-sm text-gray-600">{filteredUsers.length} users</span>
+      </div>
+
+      {/* Search */}
+      <div className="bg-white rounded-lg p-4 shadow-sm border">
+        <div className="flex items-center gap-2">
+          <Search className="w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search users..."
+            className="w-full px-3 py-2 border rounded-lg"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {/* Users Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredUsers.map((user) => (
+          <div key={user._id || user.id} className="bg-white rounded-lg p-6 shadow-sm border">
+            <div className="flex items-center justify-between mb-4">
+              <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center">
+                <Users className="w-6 h-6 text-gray-600" />
+              </div>
+              <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
+                {user.status || 'active'}
+              </span>
+            </div>
+            
+            <h3 className="text-lg font-semibold mb-2">{user.name}</h3>
+            
+            <div className="space-y-2 text-sm text-gray-600">
+              <div className="flex items-center gap-2">
+                <Mail className="w-4 h-4" />
+                {user.email}
+              </div>
+              <div className="flex items-center gap-2">
+                <Phone className="w-4 h-4" />
+                {user.phone}
+              </div>
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4" />
+                Joined {new Date(user.joinDate || user.createdAt).toLocaleDateString()}
+              </div>
+            </div>
+            
+            <div className="mt-4 pt-4 border-t">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Total Orders:</span>
+                <span className="font-semibold">{user.totalOrders || 0}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Total Spent:</span>
+                <span className="font-semibold">UGX {(user.totalSpent || 0).toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {filteredUsers.length === 0 && (
+        <div className="text-center py-8 text-gray-500">
+          No users found matching your search criteria.
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Main App Component
+const AdminPanel = () => {
+  const [activeTab, setActiveTab] = useState('dashboard');
+
+  const navigation = [
+    { id: 'dashboard', name: 'Dashboard', icon: TrendingUp },
+    { id: 'orders', name: 'Orders', icon: ShoppingBag },
+    { id: 'users', name: 'Users', icon: Users }
+  ];
+
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'dashboard':
+        return <Dashboard />;
+      case 'orders':
+        return <OrdersManagement />;
+      case 'users':
+        return <UsersManagement />;
+      default:
+        return <Dashboard />;
+    }
+  };
+
+  return (
+    <AdminDataProvider>
+      <div className="min-h-screen bg-gray-50">
+        {/* Header */}
+        <header className="bg-white shadow-sm border-b">
+          <div className="px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-4 bg-green-500 rounded transform -rotate-12"></div>
+                  <div className="w-2 h-4 bg-green-600 rounded transform rotate-12"></div>
+                </div>
+                <h1 className="text-xl font-bold text-gray-900">KOODI FOODS</h1>
+                <span className="text-sm text-gray-500">Admin Panel</span>
+              </div>
+              <div className="text-sm text-gray-500">
+                Connected to: koodi-foods-backend-xii6.onrender.com
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <div className="flex">
+          {/* Sidebar */}
+          <nav className="w-64 bg-white shadow-sm min-h-screen">
+            <div className="p-4">
+              <ul className="space-y-2">
+                {navigation.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <li key={item.id}>
+                      <button
+                        onClick={() => setActiveTab(item.id)}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors ${
+                          activeTab === item.id
+                            ? 'bg-green-100 text-green-700 font-medium'
+                            : 'text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        <Icon className="w-5 h-5" />
+                        {item.name}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </nav>
+
+          {/* Main Content */}
+          <main className="flex-1 p-6">
+            {renderContent()}
+          </main>
+        </div>
+      </div>
+    </AdminDataProvider>
+  );
+};
+
+export default AdminPanel;
